@@ -1,0 +1,64 @@
+import cv2
+import numpy as np
+import tensorflow as tf
+from tensorflow import keras
+
+# Define a custom layer for region of interest
+class ROILayer(keras.layers.Layer):
+    def __init__(self, vertices):
+        super(ROILayer, self).__init__()
+        self.vertices = vertices
+
+    def call(self, inputs):
+        mask = np.zeros_like(inputs)
+        cv2.fillPoly(mask, [self.vertices], (255, 255, 255))
+        return tf.bitwise.bitwise_and(inputs, mask)
+
+# Define the lane detection model
+def lane_detection_model(input_shape):
+    model = keras.Sequential()
+    model.add(keras.layers.Conv2D(32, (3, 3), activation='relu', input_shape=input_shape))
+    model.add(keras.layers.MaxPooling2D(pool_size=(2, 2)))
+    model.add(keras.layers.Conv2D(64, (3, 3), activation='relu'))
+    model.add(keras.layers.MaxPooling2D(pool_size=(2, 2)))
+    model.add(keras.layers.Flatten())
+    model.add(keras.layers.Dense(128, activation='relu'))
+    model.add(keras.layers.Dense(4))  # 4 outputs: two for each lane line (x1, y1, x2, y2)
+
+    return model
+
+# Load the pre-trained lane detection model
+model = lane_detection_model((720, 1280, 3))
+model.load_weights('lane_detection_model_weights.h5')  # Replace with your model weights
+
+cap = cv2.VideoCapture('your_video_file.mp4')  # Replace with your video file
+
+while cap.isOpened():
+    ret, frame = cap.read()
+    if not ret:
+        break
+
+    # Preprocess the frame
+    frame = cv2.resize(frame, (1280, 720))
+    input_frame = frame / 255.0  # Normalize pixel values
+    input_frame = np.expand_dims(input_frame, axis=0)
+
+    # Use the model to predict lane lines
+    predicted_lines = model.predict(input_frame)
+
+    # Reshape predicted lines into line segments
+    predicted_lines = predicted_lines.reshape(-1, 2, 2).astype(np.int32)
+
+    # Draw the predicted lane lines on the frame
+    lane_frame = frame.copy()
+    for line in predicted_lines:
+        x1, y1, x2, y2 = line[0][0], line[0][1], line[1][0], line[1][1]
+        cv2.line(lane_frame, (x1, y1), (x2, y2), (0, 255, 0), 5)
+
+    cv2.imshow('Lane Detection', lane_frame)
+
+    if cv2.waitKey(1) & 0xFF == ord('q'):
+        break
+
+cap.release()
+cv2.destroyAllWindows()
